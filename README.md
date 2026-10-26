@@ -10,7 +10,11 @@ Daily Task & Earning platform with **Firebase** backend.
 | Firebase Auth (Anonymous) | ✅ |
 | Firestore user profiles | ✅ |
 | Real balance & transactions | ✅ |
-| Task completion (daily) | ✅ |
+| Task detail + How-to steps | ✅ |
+| Task types (visit / join / watch / survey / quiz) | ✅ |
+| Instant complete + Proof review flow | ✅ |
+| Admin full task manager | ✅ |
+| Admin proof submissions (approve / reject) | ✅ |
 | Daily check-in reward | ✅ |
 | Streak system | ✅ |
 | Withdrawal requests | ✅ |
@@ -87,10 +91,22 @@ users/{uid}
   - withdrawals/{auto}
 
 tasks/{taskId}
-  - title, description, category, reward, duration, level, icon, active, order
+  - title, description, steps, type, category, link
+  - reward, duration, level, icon, iconClass, order, active
+  - proofRequired, proofHint
+
+submissions/{id}
+  - uid, taskId, taskTitle, reward, proof, status (pending|approved|rejected), date, createdAt
 ```
 
 ## Notes
 - Without Firebase config the app runs in **offline/guest mode** (no real data save)
 - Leaderboard has beautiful demo data so it never looks empty
 - Change bot username in `app.js` → `renderProfile()` for real referral links
+
+## Update: Proof screenshots, bonus, balance edit
+- Set `window.IMGBB_API_KEY` in `assets/js/firebase-config.js` (key from https://api.imgbb.com/)
+- Admin → Tasks → "Proof type": Text only / Screenshot only / Text + Screenshot
+- User picks an image, it is compressed, uploaded to ImgBB, and the returned URL is saved in `submissions/{id}.proofImage`
+- Admin → Proofs shows the screenshot (tap to open full size)
+- Admin → Users → user: "Give bonus", "Edit main balance", "Adjust (+/−)". All are logged in the user's transactions

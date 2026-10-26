@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f4ed">
+  <title>Verdant — Profile</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+<div class="loading-screen" id="loading">
+  <div class="spinner"></div>
+  <p>Loading profile...</p>
+</div>
+
+<div class="app">
+  <div class="topbar">
+    <div class="topbar-title">Profile</div>
+  </div>
+
+  <div class="page">
+    <div class="profile-hero">
+      <div class="avatar" data-profile-avatar>U</div>
+      <h2 data-profile-name>User</h2>
+      <p data-profile-user>—</p>
+      <div class="profile-tags">
+        <span>✳ Member</span>
+        <span data-profile-streak>◷ 0 day streak</span>
+      </div>
+    </div>
+
+    <div class="referral-card">
+      <h3>Invite friends & earn</h3>
+      <p>Share your link. Get $0.50 when they complete their first task.</p>
+      <div class="referral-link">
+        <span data-ref-link>t.me/VerdantBot?start=ref_------</span>
+        <button data-copy-ref>Copy</button>
+      </div>
+      <div class="referral-stats">
+        <div>
+          <small>Invited</small>
+          <strong data-ref-count>0</strong>
+        </div>
+        <div>
+          <small>Qualified</small>
+          <strong data-ref-count>0</strong>
+        </div>
+        <div>
+          <small>Earned</small>
+          <strong data-ref-earn>$0.00</strong>
+        </div>
+      </div>
+    </div>
+
+    <div class="menu-list">
+      <a href="#" class="menu-item" onclick="showToast('Coming soon'); return false;">
+        <span class="mi-icon">◎</span>
+        Edit Profile
+        <span class="arrow">›</span>
+      </a>
+      <a href="#" class="menu-item" onclick="showToast('Coming soon'); return false;">
+        <span class="mi-icon">🔔</span>
+        Notifications
+        <span class="arrow">›</span>
+      </a>
+      <a href="#" class="menu-item" onclick="showToast('Coming soon'); return false;">
+        <span class="mi-icon">🛡</span>
+        Security
+        <span class="arrow">›</span>
+      </a>
+      <a href="#" class="menu-item" onclick="showToast('Language: English'); return false;">
+        <span class="mi-icon">🌐</span>
+        Language
+        <span class="arrow">›</span>
+      </a>
+    </div>
+
+    <div class="menu-list">
+      <a href="#" class="menu-item" onclick="showToast('Help center'); return false;">
+        <span class="mi-icon">?</span>
+        Help & Support
+        <span class="arrow">›</span>
+      </a>
+      <a href="#" class="menu-item" onclick="showToast('Terms of service'); return false;">
+        <span class="mi-icon">📄</span>
+        Terms of Service
+        <span class="arrow">›</span>
+      </a>
+      <a href="#" class="menu-item" onclick="showToast('Privacy policy'); return false;">
+        <span class="mi-icon">🔒</span>
+        Privacy Policy
+        <span class="arrow">›</span>
+      </a>
+    </div>
+  </div>
+
+  <nav class="bottom-nav">
+    <a href="index.html" class="nav-item">
+      <span class="nav-icon">⌂</span> Home
+    </a>
+    <a href="tasks.html" class="nav-item">
+      <span class="nav-icon">✳</span> Tasks
+    </a>
+    <a href="leaderboard.html" class="nav-item">
+      <span class="nav-icon">🏆</span> Rank
+    </a>
+    <a href="wallet.html" class="nav-item">
+      <span class="nav-icon">◇</span> Wallet
+    </a>
+    <a href="profile.html" class="nav-item active">
+      <span class="nav-icon">◎</span> Profile
+    </a>
+  </nav>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="assets/js/firebase-config.js"></script>
+<script type="module" src="assets/js/app.js"></script>
+</body>
+</html>

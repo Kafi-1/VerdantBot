@@ -91,13 +91,27 @@ function getInitials(name) {
 function initTelegram() {
   const tg = window.Telegram?.WebApp;
   if (tg) {
-    tg.ready();
-    tg.expand();
+    try { tg.ready(); } catch (e) {}
+    try { tg.expand(); } catch (e) {}
     try {
       tg.setHeaderColor("#f5f4ed");
       tg.setBackgroundColor("#f5f4ed");
     } catch (e) {}
+    // Prefer initDataUnsafe.user (available inside Telegram)
     telegramUser = tg.initDataUnsafe?.user || null;
+    if (!telegramUser && tg.initData) {
+      // Fallback: sometimes only initData string is present
+      try {
+        const params = new URLSearchParams(tg.initData);
+        const raw = params.get("user");
+        if (raw) telegramUser = JSON.parse(raw);
+      } catch (e) {}
+    }
+    if (telegramUser) {
+      console.log("[Verdant] Telegram user:", telegramUser.id, telegramUser.first_name, telegramUser.username);
+    } else {
+      console.warn("[Verdant] No Telegram user data (open inside Telegram Mini App)");
+    }
   }
   return telegramUser;
 }
@@ -145,11 +159,27 @@ async function ensureUser() {
 async function loadOrCreateUserDoc(uid) {
   const ref = doc(db, "users", uid);
   const snap = await getDoc(ref);
+  const tg = telegramUser;
 
   if (snap.exists()) {
     userData = { id: uid, ...snap.data() };
+
+    // Always sync latest Telegram profile (name / username / photo)
+    const patch = {};
+    if (tg?.id) patch.telegramId = tg.id;
+    if (tg?.first_name) patch.firstName = tg.first_name;
+    if (tg?.last_name !== undefined && tg?.last_name !== null) patch.lastName = tg.last_name || "";
+    if (tg?.username) patch.username = tg.username;
+    if (tg?.photo_url) patch.photoUrl = tg.photo_url;
+    if (!userData.referralCode || userData.referralCode === "------" || userData.referralCode === "GUEST1") {
+      patch.referralCode = generateRefCode();
+    }
+    if (Object.keys(patch).length) {
+      patch.updatedAt = serverTimestamp();
+      await updateDoc(ref, patch);
+      userData = { ...userData, ...patch };
+    }
   } else {
-    const tg = telegramUser;
     const newUser = {
       uid,
       telegramId: tg?.id || null,
@@ -765,7 +795,7 @@ async function renderProfile() {
 
   // Referral
   const refCode = userData.referralCode || "------";
-  const botUsername = "VerdantBot"; // change later
+  const botUsername = "VerdantBot_bot"; // real bot username
   const refLink = `t.me/${botUsername}?start=ref_${refCode}`;
   const linkEl = document.querySelector("[data-ref-link]");
   if (linkEl) linkEl.textContent = refLink;
@@ -825,12 +855,13 @@ async function boot() {
     await ensureUser();
     await loadTasks();
   } else {
-    // Offline mode
+    // Offline mode — still show Telegram name if available
     userData = {
       firstName: telegramUser?.first_name || "Guest",
       lastName: telegramUser?.last_name || "",
       username: telegramUser?.username || "",
       photoUrl: telegramUser?.photo_url || "",
+      telegramId: telegramUser?.id || null,
       balance: 0,
       pending: 0,
       lifetime: 0,
@@ -838,20 +869,29 @@ async function boot() {
       tasksCompleted: 0,
       streak: 0,
       lastCheckin: null,
-      referralCode: "GUEST1",
+      referralCode: generateRefCode(),
       referrals: 0,
       referralEarnings: 0
     };
     tasks = getDefaultTasks();
   }
 
+  // If Firebase path didn't set name but Telegram has it, apply now
+  if (userData && telegramUser) {
+    if (telegramUser.first_name) userData.firstName = telegramUser.first_name;
+    if (telegramUser.last_name !== undefined) userData.lastName = telegramUser.last_name || "";
+    if (telegramUser.username) userData.username = telegramUser.username;
+    if (telegramUser.photo_url) userData.photoUrl = telegramUser.photo_url;
+    if (telegramUser.id) userData.telegramId = telegramUser.id;
+  }
+
   isReady = true;
   hideLoading();
 
-  // Detect page and render
-  const page = location.pathname.split("/").pop() || "index.html";
+  // Detect page and render (GitHub Pages path-safe)
+  const page = (location.pathname.split("/").pop() || "index.html").split("?")[0];
 
-  if (page === "index.html" || page === "" || page === "/") {
+  if (page === "index.html" || page === "" || page === "/" || page === "VerdantBot") {
     await renderHome();
   } else if (page === "tasks.html") {
     await renderTasks();
@@ -861,6 +901,9 @@ async function boot() {
     await renderProfile();
   } else if (page === "leaderboard.html") {
     await renderLeaderboard();
+  } else {
+    // fallback: try home
+    await renderHome();
   }
 
   // Bottom nav active

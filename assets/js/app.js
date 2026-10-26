@@ -82,6 +82,53 @@ function getGreeting() {
   return "Good evening";
 }
 
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// ---------- Image upload (ImgBB) ----------
+function compressImage(file, maxDim = 1280, quality = 0.8) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      let { width: w, height: h } = img;
+      const scale = Math.min(1, maxDim / Math.max(w, h));
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      canvas.toBlob(b => {
+        URL.revokeObjectURL(url);
+        b ? resolve(b) : reject(new Error("COMPRESS_FAILED"));
+      }, "image/jpeg", quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("BAD_IMAGE")); };
+    img.src = url;
+  });
+}
+
+async function uploadToImgbb(file) {
+  const key = window.IMGBB_API_KEY;
+  if (!key || key.startsWith("YOUR_")) throw new Error("NO_IMGBB_KEY");
+  if (!file.type.startsWith("image/")) throw new Error("NOT_IMAGE");
+  if (file.size > 15 * 1024 * 1024) throw new Error("TOO_BIG");
+  const blob = await compressImage(file);
+  const fd = new FormData();
+  fd.append("image", blob, "proof.jpg");
+  const res = await fetch("https://api.imgbb.com/1/upload?key=" + encodeURIComponent(key), {
+    method: "POST",
+    body: fd
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.success || !json.data?.url) {
+    throw new Error(json?.error?.message || "UPLOAD_FAILED");
+  }
+  return json.data.url; // https://i.ibb.co/...
+}
+
 function getInitials(name) {
   if (!name) return "?";
   return name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
@@ -288,20 +335,27 @@ async function updateStreak() {
 // ---------- Tasks ----------
 async function loadTasks() {
   if (!db) {
-    // Offline fallback tasks
     tasks = getDefaultTasks();
     return tasks;
   }
   try {
-    const q = query(collection(db, "tasks"), where("active", "==", true), orderBy("order", "asc"));
-    const snap = await getDocs(q);
+    let snap;
+    try {
+      const q = query(collection(db, "tasks"), where("active", "==", true), orderBy("order", "asc"));
+      snap = await getDocs(q);
+    } catch (idxErr) {
+      // Missing composite index — fallback without orderBy
+      console.warn("Tasks index missing, loading without order:", idxErr.code);
+      const q2 = query(collection(db, "tasks"), where("active", "==", true));
+      snap = await getDocs(q2);
+    }
     if (snap.empty) {
-      // Seed default tasks once
       await seedDefaultTasks();
-      const snap2 = await getDocs(q);
-      tasks = snap2.docs.map(d => ({ id: d.id, ...d.data() }));
+      const q3 = query(collection(db, "tasks"), where("active", "==", true));
+      const snap2 = await getDocs(q3);
+      tasks = snap2.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.order || 0) - (b.order || 0));
     } else {
-      tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      tasks = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.order || 0) - (b.order || 0));
     }
   } catch (e) {
     console.error("Load tasks error:", e);
@@ -312,14 +366,46 @@ async function loadTasks() {
 
 function getDefaultTasks() {
   return [
-    { id: "t1", title: "Daily knowledge quiz", description: "Answer 5 quick questions about everyday topics.", category: "quick", reward: 0.15, duration: "5 min", level: "Beginner", icon: "✳", iconClass: "", order: 1, active: true },
-    { id: "t2", title: "Explore a new topic", description: "Read a short introduction and answer one reflection question.", category: "learn", reward: 0.10, duration: "3 min", level: "Easy", icon: "◉", iconClass: "peach", order: 2, active: true },
-    { id: "t3", title: "Quick feedback survey", description: "Share your honest opinion on a product concept.", category: "survey", reward: 0.25, duration: "4 min", level: "Easy", icon: "▣", iconClass: "gold", order: 3, active: true },
-    { id: "t4", title: "Share to Telegram", description: "Share our bot with 2 friends and get rewarded.", category: "social", reward: 0.20, duration: "2 min", level: "Easy", icon: "↗", iconClass: "blue", order: 4, active: true },
-    { id: "t5", title: "Watch a short video", description: "Watch a 30-second educational clip and confirm.", category: "quick", reward: 0.08, duration: "1 min", level: "Easy", icon: "▶", iconClass: "", order: 5, active: true },
-    { id: "t6", title: "Complete a short lesson", description: "Finish a 4-minute micro-lesson on digital skills.", category: "learn", reward: 0.18, duration: "4 min", level: "Beginner", icon: "📘", iconClass: "peach", order: 6, active: true },
-    { id: "t7", title: "Rate & review", description: "Leave a short honest review for a partner app.", category: "survey", reward: 0.30, duration: "3 min", level: "Easy", icon: "★", iconClass: "gold", order: 7, active: true },
-    { id: "t8", title: "Join community group", description: "Join our official Telegram group.", category: "social", reward: 0.12, duration: "1 min", level: "Easy", icon: "💬", iconClass: "blue", order: 8, active: true }
+    {
+      id: "t1", title: "Join our Telegram channel", description: "Join the official Verdant updates channel.",
+      category: "social", type: "join", reward: 0.15, duration: "1 min", level: "Easy", icon: "📢", iconClass: "blue", order: 1, active: true,
+      link: "https://t.me/verdantbot", steps: "1. Tap Open Channel below\n2. Join the channel\n3. Come back and mark as done", proofRequired: false, proofHint: ""
+    },
+    {
+      id: "t2", title: "Visit our website", description: "Open the Verdant site and explore for 30 seconds.",
+      category: "quick", type: "visit", reward: 0.10, duration: "1 min", level: "Easy", icon: "🌐", iconClass: "", order: 2, active: true,
+      link: "https://example.com", steps: "1. Tap Open Link\n2. Browse the page for ~30 seconds\n3. Return and confirm", proofRequired: false, proofHint: ""
+    },
+    {
+      id: "t3", title: "Share bot with a friend", description: "Share Verdant bot link with at least one friend.",
+      category: "social", type: "social", reward: 0.20, duration: "2 min", level: "Easy", icon: "↗", iconClass: "blue", order: 3, active: true,
+      link: "", steps: "1. Open share menu or copy referral from Profile\n2. Send to a friend on Telegram\n3. Confirm below", proofRequired: false, proofHint: ""
+    },
+    {
+      id: "t4", title: "Watch short intro video", description: "Watch a short educational clip about earning online.",
+      category: "quick", type: "watch", reward: 0.12, duration: "2 min", level: "Easy", icon: "▶", iconClass: "peach", order: 4, active: true,
+      link: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", steps: "1. Tap Open Video\n2. Watch at least 30 seconds\n3. Return and confirm", proofRequired: false, proofHint: ""
+    },
+    {
+      id: "t5", title: "Quick feedback survey", description: "Answer 3 short questions about the app.",
+      category: "survey", type: "survey", reward: 0.25, duration: "3 min", level: "Easy", icon: "▣", iconClass: "gold", order: 5, active: true,
+      link: "", steps: "1. Read each question carefully\n2. Think about your honest answer\n3. Confirm you completed the survey", proofRequired: true, proofHint: "Write one short sentence of feedback"
+    },
+    {
+      id: "t6", title: "Daily knowledge check", description: "Answer a few general knowledge questions.",
+      category: "learn", type: "quiz", reward: 0.15, duration: "4 min", level: "Beginner", icon: "📘", iconClass: "peach", order: 6, active: true,
+      link: "", steps: "1. Read the questions\n2. Answer honestly\n3. Submit your answers as proof", proofRequired: true, proofHint: "Type your answers briefly"
+    },
+    {
+      id: "t7", title: "Join community group", description: "Join the Verdant community chat group.",
+      category: "social", type: "join", reward: 0.12, duration: "1 min", level: "Easy", icon: "💬", iconClass: "blue", order: 7, active: true,
+      link: "https://t.me/verdantbot", steps: "1. Tap Open Group\n2. Join the group\n3. Come back and mark done", proofRequired: false, proofHint: ""
+    },
+    {
+      id: "t8", title: "Rate your experience", description: "Leave a short honest review of using Verdant.",
+      category: "survey", type: "survey", reward: 0.18, duration: "2 min", level: "Easy", icon: "★", iconClass: "gold", order: 8, active: true,
+      link: "", steps: "1. Think about what you liked\n2. Write a short review as proof\n3. Submit for review", proofRequired: true, proofHint: "Write 1-2 sentences about your experience"
+    }
   ];
 }
 
@@ -346,6 +432,22 @@ async function getCompletedTaskIds() {
   }
 }
 
+async function hasPendingSubmission(taskId) {
+  if (!db || !userData) return false;
+  try {
+    const q = query(
+      collection(db, "submissions"),
+      where("uid", "==", userData.id),
+      where("taskId", "==", taskId),
+      where("status", "==", "pending")
+    );
+    const snap = await getDocs(q);
+    return !snap.empty;
+  } catch (e) {
+    return false;
+  }
+}
+
 async function completeTask(taskId) {
   if (!db || !userData || userData._offline) {
     showToast("Firebase Auth off — enable Anonymous login");
@@ -362,7 +464,6 @@ async function completeTask(taskId) {
   }
 
   try {
-    // Add to completed
     await addDoc(collection(db, "users", userData.id, "completedTasks"), {
       taskId,
       title: task.title,
@@ -371,7 +472,6 @@ async function completeTask(taskId) {
       completedAt: serverTimestamp()
     });
 
-    // Add transaction
     await addDoc(collection(db, "users", userData.id, "transactions"), {
       type: "earn",
       title: task.title,
@@ -380,7 +480,6 @@ async function completeTask(taskId) {
       createdAt: serverTimestamp()
     });
 
-    // Update user balance
     await updateDoc(doc(db, "users", userData.id), {
       balance: increment(task.reward),
       lifetime: increment(task.reward),
@@ -392,13 +491,217 @@ async function completeTask(taskId) {
     userData.lifetime = (userData.lifetime || 0) + task.reward;
     userData.tasksCompleted = (userData.tasksCompleted || 0) + 1;
 
-    showToast(`+$${task.reward.toFixed(2)} earned!`);
+    showToast(`+$${Number(task.reward).toFixed(2)} earned!`);
     return true;
   } catch (e) {
     console.error("Complete task error:", e);
     showToast("Error completing task");
     return false;
   }
+}
+
+async function submitProof(taskId, proofText, file) {
+  if (!db || !userData || userData._offline) {
+    showToast("Firebase Auth off — enable Anonymous login");
+    return false;
+  }
+  const task = tasks.find(t => t.id === taskId);
+  if (!task) return false;
+
+  const completed = await getCompletedTaskIds();
+  if (completed.has(taskId)) {
+    showToast("Already completed today");
+    return false;
+  }
+  if (await hasPendingSubmission(taskId)) {
+    showToast("Already submitted — waiting for review");
+    return false;
+  }
+
+  const ptype = task.proofType || "text";
+  const needText = ptype === "text" || ptype === "both";
+  const needImage = ptype === "image" || ptype === "both";
+
+  const proof = (proofText || "").trim();
+  if (needText && !proof) {
+    showToast("Please enter proof text");
+    return false;
+  }
+  if (needImage && !file) {
+    showToast("Please choose a screenshot");
+    return false;
+  }
+
+  let proofImage = "";
+  if (file) {
+    try {
+      showToast("Uploading image...");
+      proofImage = await uploadToImgbb(file);
+    } catch (e) {
+      console.error("Image upload error:", e);
+      const m = String(e?.message || "");
+      if (m === "NO_IMGBB_KEY") showToast("Image upload not configured (admin)");
+      else if (m === "NOT_IMAGE") showToast("Please select an image file");
+      else if (m === "TOO_BIG") showToast("Image too large (max 15MB)");
+      else showToast("Image upload failed. Try again");
+      return false;
+    }
+  }
+
+  try {
+    await addDoc(collection(db, "submissions"), {
+      uid: userData.id,
+      taskId,
+      taskTitle: task.title,
+      reward: task.reward,
+      proof,
+      proofImage,
+      status: "pending",
+      date: todayKey(),
+      createdAt: serverTimestamp(),
+      userName: [userData.firstName, userData.lastName].filter(Boolean).join(" ") || userData.username || "User"
+    });
+    showToast("Submitted — waiting for approval");
+    return true;
+  } catch (e) {
+    console.error("Submit proof error:", e);
+    showToast("Error submitting proof");
+    return false;
+  }
+}
+
+function ensureTaskModal() {
+  if (document.getElementById("task-modal-overlay")) return;
+  const div = document.createElement("div");
+  div.id = "task-modal-overlay";
+  div.className = "modal-overlay";
+  div.innerHTML = `<div class="modal" id="task-modal"><div class="modal-handle"></div><div id="task-modal-body"></div></div>`;
+  div.addEventListener("click", (e) => {
+    if (e.target === div) closeTaskModal();
+  });
+  document.body.appendChild(div);
+}
+
+function closeTaskModal() {
+  const el = document.getElementById("task-modal-overlay");
+  if (el) el.classList.remove("open");
+}
+
+function openTaskModal(html) {
+  ensureTaskModal();
+  document.getElementById("task-modal-body").innerHTML = html;
+  document.getElementById("task-modal-overlay").classList.add("open");
+}
+
+function stepsHTML(steps) {
+  if (!steps || !String(steps).trim()) return "";
+  const lines = String(steps).split("\n").map(s => s.trim()).filter(Boolean);
+  if (!lines.length) return "";
+  return `<div class="task-steps"><h4>How to complete</h4><ol>${lines.map(l => `<li>${l.replace(/^\d+[\.\)]\s*/, "")}</li>`).join("")}</ol></div>`;
+}
+
+async function openTaskDetail(taskId) {
+  const task = tasks.find(t => t.id === taskId);
+  if (!task) return;
+
+  const completed = await getCompletedTaskIds();
+  const isDone = completed.has(taskId);
+  const pending = !isDone && task.proofRequired ? await hasPendingSubmission(taskId) : false;
+
+  const typeLabel = {
+    visit: "Visit link", join: "Join channel", watch: "Watch video",
+    survey: "Survey", quiz: "Quiz", social: "Social", other: "Task"
+  }[task.type] || task.category || "Task";
+
+  let actionArea = "";
+  if (isDone) {
+    actionArea = `<div class="task-done-banner">✓ Completed today</div>`;
+  } else if (pending) {
+    actionArea = `<div class="task-pending-banner">⏳ Submitted — waiting for admin review</div>`;
+  } else if (task.proofRequired) {
+    const ptype = task.proofType || "text";
+    const showText = ptype === "text" || ptype === "both";
+    const showImage = ptype === "image" || ptype === "both";
+    actionArea = `
+      <div class="form-field">
+        <label>${esc(task.proofHint || "Submit proof")}</label>
+        ${showText ? `<textarea id="proof-input" rows="3" placeholder="Enter proof text..." style="width:100%;padding:12px;border:1px solid var(--border);border-radius:12px;font:inherit;resize:vertical"></textarea>` : ""}
+        ${showImage ? `
+          <input type="file" id="proof-file" accept="image/*" style="width:100%;margin-top:8px;padding:10px;border:1px dashed var(--border);border-radius:12px;font:inherit">
+          <img id="proof-preview" alt="" style="display:none;max-width:100%;max-height:200px;margin-top:8px;border-radius:12px">` : ""}
+      </div>
+      ${task.link ? `<a class="btn-primary" href="${esc(task.link)}" target="_blank" rel="noopener" style="display:block;text-align:center;margin-bottom:10px;text-decoration:none">Open link →</a>` : ""}
+      <button class="btn-primary" id="btn-submit-proof" style="width:100%">Submit for review</button>
+      <button class="btn-secondary" id="btn-close-task" style="width:100%;margin-top:8px">Close</button>`;
+  } else {
+    actionArea = `
+      ${task.link ? `<a class="btn-primary" href="${task.link}" target="_blank" rel="noopener" id="btn-open-link" style="display:block;text-align:center;margin-bottom:10px;text-decoration:none">Open ${typeLabel} →</a>` : ""}
+      <button class="btn-primary" id="btn-mark-done" style="width:100%">I completed this · +$${Number(task.reward).toFixed(2)}</button>
+      <button class="btn-secondary" id="btn-close-task" style="width:100%;margin-top:8px">Close</button>`;
+  }
+
+  openTaskModal(`
+    <div class="task-detail-icon ${task.iconClass || ""}">${task.icon || "✳"}</div>
+    <h3>${task.title}</h3>
+    <p>${task.description || ""}</p>
+    <div class="task-detail-reward">+$${Number(task.reward).toFixed(2)}</div>
+    <div class="task-detail-meta">
+      <span>◷ ${task.duration || "—"}</span>
+      <span>${task.level || "Easy"}</span>
+      <span>${typeLabel}</span>
+      ${task.proofRequired ? "<span>· Proof needed</span>" : ""}
+    </div>
+    ${stepsHTML(task.steps)}
+    ${actionArea}
+  `);
+
+  document.getElementById("btn-close-task")?.addEventListener("click", closeTaskModal);
+
+  document.getElementById("btn-mark-done")?.addEventListener("click", async () => {
+    const btn = document.getElementById("btn-mark-done");
+    btn.disabled = true;
+    btn.textContent = "...";
+    const ok = await completeTask(taskId);
+    if (ok) {
+      closeTaskModal();
+      const page = (location.pathname.split("/").pop() || "index.html").split("?")[0];
+      if (page === "tasks.html") await renderTasks();
+      else await renderHome();
+    } else {
+      btn.disabled = false;
+      btn.textContent = `I completed this · +$${Number(task.reward).toFixed(2)}`;
+    }
+  });
+
+  document.getElementById("proof-file")?.addEventListener("change", (e) => {
+    const f = e.target.files?.[0];
+    const prev = document.getElementById("proof-preview");
+    if (!prev) return;
+    if (f && f.type.startsWith("image/")) {
+      prev.src = URL.createObjectURL(f);
+      prev.style.display = "block";
+    } else {
+      prev.style.display = "none";
+    }
+  });
+
+  document.getElementById("btn-submit-proof")?.addEventListener("click", async () => {
+    const btn = document.getElementById("btn-submit-proof");
+    const proof = document.getElementById("proof-input")?.value || "";
+    const file = document.getElementById("proof-file")?.files?.[0] || null;
+    btn.disabled = true;
+    btn.textContent = "Uploading...";
+    const ok = await submitProof(taskId, proof, file);
+    if (ok) {
+      closeTaskModal();
+      const page = (location.pathname.split("/").pop() || "index.html").split("?")[0];
+      if (page === "tasks.html") await renderTasks();
+      else await renderHome();
+    } else {
+      btn.disabled = false;
+      btn.textContent = "Submit for review";
+    }
+  });
 }
 
 // ---------- Check-in ----------
@@ -666,43 +969,29 @@ function renderStreakDays() {
 }
 
 function taskCardHTML(t, isDone) {
+  const badge = t.proofRequired ? "Review" : "Instant";
   return `
     <div class="task-card ${isDone ? "completed" : ""}" data-task data-category="${t.category}" data-search="${t.title} ${t.description}" data-id="${t.id}">
       <div class="task-icon ${t.iconClass || ""}">${t.icon || "✳"}</div>
       <div class="task-body">
         <h3>${t.title}</h3>
-        <p>${t.description}</p>
-        <div class="task-meta"><span>◷ ${t.duration}</span><span>${t.level}</span></div>
+        <p>${t.description || ""}</p>
+        <div class="task-meta"><span>◷ ${t.duration || "—"}</span><span>${t.level || "Easy"}</span><span>${badge}</span></div>
       </div>
       <div class="task-reward">
         <span class="amount">+$${Number(t.reward).toFixed(2)}</span>
-        <button class="btn-start" data-start-task ${isDone ? "disabled" : ""}>${isDone ? "Done ✓" : "Start"}</button>
+        <button class="btn-start" data-open-task ${isDone ? "disabled" : ""}>${isDone ? "Done ✓" : "View"}</button>
       </div>
     </div>`;
 }
 
 function bindTaskButtons(container) {
-  container.querySelectorAll("[data-start-task]").forEach(btn => {
-    btn.addEventListener("click", async (e) => {
+  container.querySelectorAll("[data-task]").forEach(card => {
+    card.addEventListener("click", async (e) => {
       e.preventDefault();
-      if (btn.disabled) return;
-      const card = btn.closest("[data-task]");
-      const id = card?.dataset.id;
+      const id = card.dataset.id;
       if (!id) return;
-
-      btn.disabled = true;
-      btn.textContent = "...";
-      const ok = await completeTask(id);
-      if (ok) {
-        card.classList.add("completed");
-        btn.textContent = "Done ✓";
-        // Refresh balance if on home
-        renderBalance("[data-balance]", userData.balance);
-        renderBalance("[data-wallet-balance]", userData.balance);
-      } else {
-        btn.disabled = false;
-        btn.textContent = "Start";
-      }
+      await openTaskDetail(id);
     });
   });
 }

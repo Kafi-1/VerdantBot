@@ -13,3 +13,7 @@ window.FIREBASE_CONFIG = {
   appId: "1:393707457422:web:558766ba614b04ee1f32df",
   measurementId: "G-9WEF8Z2FL8"
 };
+
+// ImgBB image upload (for proof screenshots)
+// Get a free key from https://api.imgbb.com/ and paste it here
+window.IMGBB_API_KEY = "182bb73093c9996155daf62faa5b5d0d";

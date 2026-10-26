@@ -136,27 +136,70 @@ async function initFirebase() {
 // ---------- User ----------
 async function ensureUser() {
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (val) => {
+      if (settled) return;
+      settled = true;
+      resolve(val);
+    };
+    const timer = setTimeout(() => {
+      console.error("Auth timeout");
+      finish(null);
+    }, 12000);
+
     onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        currentUser = user;
-        await loadOrCreateUserDoc(user.uid);
-        resolve(user);
-      } else {
-        try {
-          const cred = await signInAnonymously(auth);
-          currentUser = cred.user;
-          await loadOrCreateUserDoc(cred.user.uid);
-          resolve(cred.user);
-        } catch (e) {
-          console.error("Auth error:", e);
-          resolve(null);
+      try {
+        if (user) {
+          currentUser = user;
+          await loadOrCreateUserDoc(user.uid);
+          clearTimeout(timer);
+          finish(user);
+        } else {
+          try {
+            const cred = await signInAnonymously(auth);
+            currentUser = cred.user;
+            await loadOrCreateUserDoc(cred.user.uid);
+            clearTimeout(timer);
+            finish(cred.user);
+          } catch (e) {
+            console.error("Auth error:", e?.code || e, e?.message || e);
+            clearTimeout(timer);
+            finish(null);
+          }
         }
+      } catch (e) {
+        console.error("ensureUser error:", e);
+        clearTimeout(timer);
+        finish(null);
       }
     });
   });
 }
 
+
+function buildOfflineUser() {
+  return {
+    firstName: telegramUser?.first_name || "Guest",
+    lastName: telegramUser?.last_name || "",
+    username: telegramUser?.username || "",
+    photoUrl: telegramUser?.photo_url || "",
+    telegramId: telegramUser?.id || null,
+    balance: 0,
+    pending: 0,
+    lifetime: 0,
+    withdrawn: 0,
+    tasksCompleted: 0,
+    streak: 0,
+    lastCheckin: null,
+    referralCode: generateRefCode(),
+    referrals: 0,
+    referralEarnings: 0,
+    _offline: true
+  };
+}
+
 async function loadOrCreateUserDoc(uid) {
+
   const ref = doc(db, "users", uid);
   const snap = await getDoc(ref);
   const tg = telegramUser;
@@ -304,8 +347,8 @@ async function getCompletedTaskIds() {
 }
 
 async function completeTask(taskId) {
-  if (!db || !userData) {
-    showToast("Firebase not connected");
+  if (!db || !userData || userData._offline) {
+    showToast("Firebase Auth off — enable Anonymous login");
     return false;
   }
 
@@ -360,8 +403,8 @@ async function completeTask(taskId) {
 
 // ---------- Check-in ----------
 async function doCheckin() {
-  if (!db || !userData) {
-    showToast("Firebase not connected");
+  if (!db || !userData || userData._offline) {
+    showToast("Firebase Auth off — enable Anonymous login");
     return false;
   }
 
@@ -852,27 +895,18 @@ async function boot() {
   const hasFirebase = await initFirebase();
 
   if (hasFirebase) {
-    await ensureUser();
-    await loadTasks();
+    const user = await ensureUser();
+    if (!user || !userData) {
+      // Auth failed (usually Anonymous not enabled in Firebase Console)
+      console.warn("Firebase auth failed — offline mode. Enable Anonymous Auth in Firebase Console.");
+      userData = buildOfflineUser();
+      tasks = getDefaultTasks();
+      setTimeout(() => showToast("Enable Anonymous Auth in Firebase"), 500);
+    } else {
+      await loadTasks();
+    }
   } else {
-    // Offline mode — still show Telegram name if available
-    userData = {
-      firstName: telegramUser?.first_name || "Guest",
-      lastName: telegramUser?.last_name || "",
-      username: telegramUser?.username || "",
-      photoUrl: telegramUser?.photo_url || "",
-      telegramId: telegramUser?.id || null,
-      balance: 0,
-      pending: 0,
-      lifetime: 0,
-      withdrawn: 0,
-      tasksCompleted: 0,
-      streak: 0,
-      lastCheckin: null,
-      referralCode: generateRefCode(),
-      referrals: 0,
-      referralEarnings: 0
-    };
+    userData = buildOfflineUser();
     tasks = getDefaultTasks();
   }
 

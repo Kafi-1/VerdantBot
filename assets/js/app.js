@@ -43,9 +43,10 @@ let isReady = false;
 const REFERRAL_REWARD = 0.50;
 
 // ---------- Session Cache (fast page switches) ----------
-const CACHE_USER = "verdant_user_v1";
-const CACHE_TASKS = "verdant_tasks_v1";
-const CACHE_TTL_MS = 120000; // 2 minutes
+const CACHE_USER = "verdant_user_v2";
+const CACHE_TASKS = "verdant_tasks_v2";
+const CACHE_COMPLETED = "verdant_completed_v2";
+const CACHE_TTL_MS = 600000; // 10 minutes — much faster page switches
 
 function saveCache() {
   try {
@@ -81,6 +82,28 @@ function loadCacheTasks() {
     const { t, data } = JSON.parse(raw);
     if (!data || !Array.isArray(data) || Date.now() - t > CACHE_TTL_MS) return null;
     return data;
+  } catch (e) {
+    return null;
+  }
+}
+
+function saveCompletedCache(set) {
+  try {
+    sessionStorage.setItem(CACHE_COMPLETED, JSON.stringify({
+      t: Date.now(),
+      date: todayKey(),
+      ids: [...set]
+    }));
+  } catch (e) {}
+}
+
+function loadCompletedCache() {
+  try {
+    const raw = sessionStorage.getItem(CACHE_COMPLETED);
+    if (!raw) return null;
+    const { t, date, ids } = JSON.parse(raw);
+    if (!ids || date !== todayKey() || Date.now() - t > CACHE_TTL_MS) return null;
+    return new Set(ids);
   } catch (e) {
     return null;
   }
@@ -208,7 +231,7 @@ async function ensureUser() {
     const timer = setTimeout(() => {
       console.error("Auth timeout");
       finish(null);
-    }, 4000);
+    }, 3500);
 
     onAuthStateChanged(auth, async (user) => {
       try {
@@ -408,6 +431,10 @@ function getDefaultTasks() {
 }
 
 async function getCompletedTaskIds() {
+  // Prefer cache for instant UI
+  const cached = loadCompletedCache();
+  if (cached) return cached;
+
   if (!db || !userData) return new Set();
   try {
     const q = query(
@@ -415,7 +442,9 @@ async function getCompletedTaskIds() {
       where("date", "==", todayKey())
     );
     const snap = await getDocs(q);
-    return new Set(snap.docs.map(d => d.data().taskId));
+    const set = new Set(snap.docs.map(d => d.data().taskId));
+    saveCompletedCache(set);
+    return set;
   } catch (e) {
     return new Set();
   }
@@ -523,6 +552,11 @@ async function completeTask(taskId) {
     userData.lifetime = (userData.lifetime || 0) + task.reward;
     userData.tasksCompleted = (userData.tasksCompleted || 0) + 1;
     saveCache();
+
+    // Update completed-tasks cache so next render is instant
+    const cachedSet = loadCompletedCache() || new Set();
+    cachedSet.add(taskId);
+    saveCompletedCache(cachedSet);
 
     // Give referral reward to referrer on first completed task
     await giveReferralRewardIfNeeded();
@@ -992,7 +1026,13 @@ async function loadLeaderboard() {
 
 // ---------- Render Helpers ----------
 function hideLoading() {
-  document.getElementById("loading")?.classList.add("hidden");
+  const el = document.getElementById("loading");
+  if (!el) return;
+  el.classList.add("hidden");
+  // Remove from DOM after transition for cleaner memory
+  setTimeout(() => {
+    if (el.classList.contains("hidden")) el.style.display = "none";
+  }, 280);
 }
 
 function renderBalance(selector, amount) {
@@ -1022,8 +1062,10 @@ async function renderHome() {
   renderBalance("[data-balance]", userData.balance || 0);
   const pendingEl = document.querySelector("[data-pending]");
   if (pendingEl) pendingEl.textContent = `$${(userData.pending || 0).toFixed(2)}`;
-  const streakEl = document.querySelector("[data-streak-val]");
-  if (streakEl) streakEl.textContent = String(userData.streak || 0).padStart(2, "0");
+  // Update all streak value elements (balance card + stats card)
+  document.querySelectorAll("[data-streak-val]").forEach(el => {
+    el.textContent = String(userData.streak || 0).padStart(2, "0");
+  });
 
   // Tasks completed
   const tasksEl = document.querySelector("[data-tasks-done]");
@@ -1337,6 +1379,106 @@ async function renderProfile() {
   // Stats tags
   const streakTag = document.querySelector("[data-profile-streak]");
   if (streakTag) streakTag.textContent = `◷ ${userData.streak || 0} day streak`;
+
+  // Profile menu actions
+  document.getElementById("btn-edit-profile")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    openEditProfileModal();
+  });
+  document.getElementById("btn-security")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    openSecurityModal();
+  });
+  document.getElementById("btn-language")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    openTranslator();
+  });
+  document.getElementById("btn-help")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    openHelpModal();
+  });
+}
+
+function openEditProfileModal() {
+  if (!userData) return;
+  const name = [userData.firstName, userData.lastName].filter(Boolean).join(" ") || "User";
+  const uname = userData.username ? `@${userData.username}` : "—";
+  openTaskModal(`
+    <h3 style="margin:0 0 6px">Edit Profile</h3>
+    <p style="color:var(--text-muted);font-size:13px;margin:0 0 14px">Profile data comes from Telegram and updates automatically.</p>
+    <div class="menu-list" style="margin:0">
+      <div class="menu-item" style="pointer-events:none">
+        <span class="mi-icon">◎</span>
+        <div style="flex:1"><strong style="display:block;font-size:14px">${esc(name)}</strong><small style="color:var(--text-muted)">Display name</small></div>
+      </div>
+      <div class="menu-item" style="pointer-events:none">
+        <span class="mi-icon">@</span>
+        <div style="flex:1"><strong style="display:block;font-size:14px">${esc(uname)}</strong><small style="color:var(--text-muted)">Username</small></div>
+      </div>
+      <div class="menu-item" style="pointer-events:none">
+        <span class="mi-icon">#</span>
+        <div style="flex:1"><strong style="display:block;font-size:14px">${esc(String(userData.telegramId || "—"))}</strong><small style="color:var(--text-muted)">Telegram ID</small></div>
+      </div>
+      <div class="menu-item" style="pointer-events:none">
+        <span class="mi-icon">✳</span>
+        <div style="flex:1"><strong style="display:block;font-size:14px">${esc(userData.referralCode || "—")}</strong><small style="color:var(--text-muted)">Referral code</small></div>
+      </div>
+    </div>
+    <button class="btn-secondary" id="btn-close-task" style="width:100%;margin-top:14px">Close</button>
+  `);
+  document.getElementById("btn-close-task")?.addEventListener("click", closeTaskModal);
+}
+
+function openSecurityModal() {
+  openTaskModal(`
+    <h3 style="margin:0 0 6px">Security</h3>
+    <p style="color:var(--text-muted);font-size:13px;margin:0 0 14px">Your account is protected by Telegram authentication.</p>
+    <div class="menu-list" style="margin:0">
+      <div class="menu-item" style="pointer-events:none">
+        <span class="mi-icon">🛡</span>
+        <div style="flex:1"><strong style="display:block;font-size:14px">Telegram Login</strong><small style="color:var(--text-muted)">Secure · always on</small></div>
+      </div>
+      <div class="menu-item" style="pointer-events:none">
+        <span class="mi-icon">🔒</span>
+        <div style="flex:1"><strong style="display:block;font-size:14px">Anonymous Auth</strong><small style="color:var(--text-muted)">Firebase protected session</small></div>
+      </div>
+      <div class="menu-item" style="pointer-events:none">
+        <span class="mi-icon">✓</span>
+        <div style="flex:1"><strong style="display:block;font-size:14px">Data encrypted in transit</strong><small style="color:var(--text-muted)">HTTPS + Firebase security</small></div>
+      </div>
+    </div>
+    <p style="color:var(--text-muted);font-size:12px;margin:14px 0 0;line-height:1.5">We never store your Telegram password. All sensitive actions require being inside the official Mini App.</p>
+    <button class="btn-secondary" id="btn-close-task" style="width:100%;margin-top:14px">Close</button>
+  `);
+  document.getElementById("btn-close-task")?.addEventListener("click", closeTaskModal);
+}
+
+function openHelpModal() {
+  openTaskModal(`
+    <h3 style="margin:0 0 6px">Help & Support</h3>
+    <p style="color:var(--text-muted);font-size:13px;margin:0 0 14px">Quick answers and how to get help.</p>
+    <div class="menu-list" style="margin:0">
+      <div class="menu-item" style="pointer-events:none">
+        <span class="mi-icon">1</span>
+        <div style="flex:1"><strong style="display:block;font-size:14px">How to earn?</strong><small style="color:var(--text-muted)">Open Tasks → complete easy tasks → balance increases</small></div>
+      </div>
+      <div class="menu-item" style="pointer-events:none">
+        <span class="mi-icon">2</span>
+        <div style="flex:1"><strong style="display:block;font-size:14px">When can I withdraw?</strong><small style="color:var(--text-muted)">Minimum $2.00 · Wallet → Request Withdrawal</small></div>
+      </div>
+      <div class="menu-item" style="pointer-events:none">
+        <span class="mi-icon">3</span>
+        <div style="flex:1"><strong style="display:block;font-size:14px">Referral bonus</strong><small style="color:var(--text-muted)">Share your link · get $0.50 when friend completes first task</small></div>
+      </div>
+      <div class="menu-item" style="pointer-events:none">
+        <span class="mi-icon">4</span>
+        <div style="flex:1"><strong style="display:block;font-size:14px">Proof tasks</strong><small style="color:var(--text-muted)">Some tasks need review · usually processed within 24h</small></div>
+      </div>
+    </div>
+    <p style="color:var(--text-muted);font-size:12px;margin:14px 0 0;line-height:1.5">Need more help? Contact support through the official Verdant channel or bot.</p>
+    <button class="btn-secondary" id="btn-close-task" style="width:100%;margin-top:14px">Close</button>
+  `);
+  document.getElementById("btn-close-task")?.addEventListener("click", closeTaskModal);
 }
 
 async function renderLeaderboard() {

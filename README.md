@@ -28,7 +28,15 @@ Daily Task & Earning platform with **Firebase** backend.
 - `leaderboard.html` — Rankings (demo data included)
 - `wallet.html` — Balance + transactions + withdraw
 - `profile.html` — Profile + referral
+- `notifications.html` — Inbox / alerts
+- `privacy.html` — Privacy Policy
+- `terms.html` — Terms of Service
 - `admin/index.html` — Admin panel (login with Firebase Email/Password)
+
+## Performance
+- Session cache for user + tasks (2 min TTL) so page switches feel instant
+- Auth timeout reduced to 6s
+- Cache-first boot: UI shows immediately when cache exists, then refreshes in background
 
 ## Setup (Important)
 
@@ -103,10 +111,3 @@ submissions/{id}
 - Without Firebase config the app runs in **offline/guest mode** (no real data save)
 - Leaderboard has beautiful demo data so it never looks empty
 - Change bot username in `app.js` → `renderProfile()` for real referral links
-
-## Update: Proof screenshots, bonus, balance edit
-- Set `window.IMGBB_API_KEY` in `assets/js/firebase-config.js` (key from https://api.imgbb.com/)
-- Admin → Tasks → "Proof type": Text only / Screenshot only / Text + Screenshot
-- User picks an image, it is compressed, uploaded to ImgBB, and the returned URL is saved in `submissions/{id}.proofImage`
-- Admin → Proofs shows the screenshot (tap to open full size)
-- Admin → Users → user: "Give bonus", "Edit main balance", "Adjust (+/−)". All are logged in the user's transactions

@@ -7,13 +7,19 @@
   <title>Verdant — Home</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+  <link rel="dns-prefetch" href="https://www.gstatic.com">
+  <link rel="dns-prefetch" href="https://firestore.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="assets/css/style.css">
 </head>
 <body>
 <!-- Loading -->
 <div class="loading-screen" id="loading">
-  <div class="spinner"></div>
+  <div class="loader-brand">
+    <div class="loader-ring"></div>
+    <div class="loader-mark">V</div>
+  </div>
   <p>Loading Verdant...</p>
 </div>
 
@@ -21,7 +27,8 @@
   <div class="topbar">
     <div class="topbar-title">Verdant</div>
     <div class="topbar-actions">
-      <button class="icon-btn" aria-label="Notifications">🔔</button>
+      <button class="icon-btn" id="btn-translator" type="button" aria-label="Translator" title="Translator">🌐</button>
+      <a href="notifications.html" class="icon-btn" aria-label="Notifications">🔔</a>
     </div>
   </div>
 
